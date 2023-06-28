@@ -1,0 +1,9 @@
+# Configuration file
+
+SCA_account: SCA_account
+SCA_username: SCA_username
+SCA_password: SCA_pasword
+nexus_server_url: http://nexsus_server:8081
+SCA_api_url: https://eu.api-sca.checkmarx.net
+SCA_auth_url: https://eu.platform.checkmarx.net/identity/connect/token
+

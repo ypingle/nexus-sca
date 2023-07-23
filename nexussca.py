@@ -5,7 +5,7 @@ import os
 import shutil
 import zipfile
 import yaml
-
+import sys
 
 # Open the YAML file
 with open('config.yaml', 'r') as file:
@@ -79,89 +79,134 @@ def zip_file(source_file, zip_file_name):
     with zipfile.ZipFile(zip_file_name, 'w', zipfile.ZIP_DEFLATED) as zipf:
         zipf.write(source_file, arcname=source_file)
 
+def add_dependency(xml_content, group_id, artifact_id, version):
+    root = ET.fromstring(xml_content)
+    dependencies = root.find(".//{http://maven.apache.org/POM/4.0.0}dependencies")
+
+    new_dependency = ET.SubElement(dependencies, "dependency")
+    ET.SubElement(new_dependency, "groupId").text = group_id
+    ET.SubElement(new_dependency, "artifactId").text = artifact_id
+    ET.SubElement(new_dependency, "version").text = version
+
+    return ET.tostring(root, encoding="unicode")
+
+def treat_package_list(packages, format):
+    try:
+        if format == 'npm':
+            file_name = code_folder + '/' + npm_manifest
+            with open(file_name, 'r') as file:
+                data = json.load(file)
+
+            # Update the dependencies in package.json
+            if 'dependencies' not in data:
+                data['dependencies'] = {}
+
+            for package in packages:
+                data['dependencies'][package['name']] = package['version']
+
+            # Save the updated package.json file
+            with open(file_name, 'w') as file:
+                json.dump(data, file, indent=2)
+
+            zip_file_name = file_name + '.zip'
+            zip_file(file_name, zip_file_name)
+
+        if format == 'pypi':
+            file_name = code_folder + '/' + pypi_manifest
+            with open(file_name, 'a') as file:
+                # Write each package and version in the correct format
+                for package in packages:
+                    file.write(f"{package['name']}=={package['version']}\n")       
+            zip_file_name = file_name + '.zip'
+            zip_file(file_name, zip_file_name)
+
+        if format == 'maven2':
+            # Load the existing pom.xml file
+            file_name = code_folder + '/' + maven_manifest 
+
+            tree = ET.parse(file_name)
+            root = tree.getroot()
+            dependencies = ET.Element('dependencies')
+
+            # Create the dependency XML structure
+            for package in packages:
+                dependency = ET.Element('dependency')
+                groupId = ET.SubElement(dependency, 'groupId')
+                groupId.text = package["group"]
+                artifactId = ET.SubElement(dependency, 'artifactId')
+                artifactId.text = package["name"]
+                version = ET.SubElement(dependency, 'version')
+                version.text = package["version"]
+                # Append the new dependency to the dependencies section
+                dependencies.append(dependency)
+            root.append(dependencies)
+
+            # Save the modified pom.xml file
+            tree.write(file_name)
+            zip_file_name = file_name + '.zip'
+            zip_file(file_name, zip_file_name)
+
+        if format == 'nuget':
+            # Load the existing packages.config file
+            file_name = code_folder + '/' + nuget_manifest 
+
+            xml_content = ''
+            with open(file_name, 'r') as file:
+                xml_content = file.read()
+
+            # Parse the XML content
+            root = ET.fromstring(xml_content)
+
+            for package in packages:
+                new_package = ET.SubElement(root, 'package')
+                new_package.set('id', package["name"])
+                new_package.set('version', package["version"])
+                new_package.set('targetFramework', 'net46')
+
+            # Save the modified XML back to a string
+            modified_xml_content = ET.tostring(root, encoding='unicode')
+
+            with open(file_name, 'w') as file:
+                file.write(modified_xml_content)
+
+            zip_file_name = file_name + '.zip'
+            zip_file(file_name, zip_file_name)
+    except Exception as e:
+        print("Exception: treat_packages_list:", str(e))
+        return ""
+    else:
+        return zip_file_name
+
 def get_packages_list(repository_name):
     try:
         url = nexus_server_url +  nexus_repository_suffix
-        response = requests.get(url + repository_name)
         zip_file_name = ''
-        
-        # Check if the request was successful (status code 200)
-        if response.status_code == 200:
-            # Parse the JSON data from the response
-            packages = response.json()['items']
+        continuationToken = ''
+        short_packages = []
 
-            print("\n")
-            print(packages[0]['format'] + " packages:")
-            for package in packages:
-                print(package['name'] + ' ' + package['version'])
+        print("\n")
+        print(repository_name + " packages:")
 
-            if packages[0]['format'] == 'npm':
-                file_name = code_folder + '\\' + npm_manifest
-                with open(file_name, 'r') as file:
-                    data = json.load(file)
-
-                # Update the dependencies in package.json
-                if 'dependencies' not in data:
-                    data['dependencies'] = {}
+        while(continuationToken != None):
+            if(continuationToken == ''):
+                response = requests.get(url + repository_name)
+            else:
+                response = requests.get(url + repository_name + '&continuationToken=' + continuationToken)
+            # Check if the request was successful (status code 200)
+            if response.status_code == 200:
+                # Parse the JSON data from the response
+                packages = response.json()['items']
+                format = packages[0]['format']
+                continuationToken = response.json()['continuationToken']
 
                 for package in packages:
-                    data['dependencies'][package['name']] = package['version']
+                    print(package['name'] + ' ' + package['version'])
 
-                # Save the updated package.json file
-                with open(file_name, 'w') as file:
-                    json.dump(data, file, indent=2)
+                    package_info = {"name": package['name'], "version": package['version'], "group": package['group']}
+                    short_packages.append(package_info)
 
-                zip_file_name = file_name + '.zip'
-                zip_file(file_name, zip_file_name)
+        zip_file_name = treat_package_list(short_packages, format)
 
-            if packages[0]['format'] == 'pypi':
-                file_name = code_folder + '\\' + pypi_manifest
-                with open(file_name, 'a') as file:
-                    # Write each package and version in the correct format
-                    for package in packages:
-                        file.write(f"{package['name']}=={package['version']}\n")       
-                zip_file_name = file_name + '.zip'
-                zip_file(file_name, zip_file_name)
-
-            if packages[0]['format'] == 'maven2':
-                # Load the existing pom.xml file
-                file_name = code_folder + '\\' + maven_manifest 
-                tree = ET.parse(file_name)
-                root = tree.getroot()
-                dependencies = ET.Element('dependencies')
-
-                # Create the dependency XML structure
-                for package in packages:
-                    dependency = ET.Element('dependency')
-                    groupId = ET.SubElement(dependency, 'groupId')
-                    groupId.text = package["group"]
-                    artifactId = ET.SubElement(dependency, 'artifactId')
-                    artifactId.text = package["name"]
-                    version = ET.SubElement(dependency, 'version')
-                    version.text = package["version"]
-                    # Append the new dependency to the dependencies section
-                    dependencies.append(dependency)
-                root.append(dependencies)
-
-                # Save the modified pom.xml file
-                tree.write(file_name)
-                zip_file_name = file_name + '.zip'
-                zip_file(file_name, zip_file_name)
-
-            if packages[0]['format'] == 'nuget':
-                # Load the existing packages.config file
-                file_name = code_folder + '\\' + nuget_manifest 
-                tree = ET.parse(file_name)
-                root = tree.getroot()
-                
-                for package in packages:
-                    package_element = ET.Element("package", attrib={"id": package["name"], "version": package["version"], "targetFramework" : "netXXX"})
-                root.append(package_element)
-
-                # Save the updated packages.config file
-                tree.write(file_name)
-                zip_file_name = file_name + '.zip'
-                zip_file(file_name, zip_file_name)
     except Exception as e:
         print("Exception: get_packages_list:", str(e))
         return ""
@@ -175,7 +220,8 @@ def get_SCA_access_token():
         'Content-Type': 'application/x-www-form-urlencoded'
         }
 
-        response = requests.request("POST", SCA_auth_url, headers=headers, data=payload)
+#        response = requests.request("POST", SCA_auth_url, headers=headers, data=payload)
+        response = requests.request("POST", SCA_auth_url, headers=headers, data=payload, verify=False)
 
         print('get_SCA_access_token - token = ' + response.text)
         response_json = response.json()
@@ -296,21 +342,34 @@ def SCA_scan_packages(repository, zip_manifest_file):
         SCA_upload_file(access_token, upload_file_url, zip_manifest_file)
         scan_id = SCA_scan_zip(access_token, project_id, upload_file_url)
 
-# 0 clear old manifex & zip files
-delete_files_in_folder(code_folder)
-# copy files from the source folder to the destination folder
-copy_files(org_code_folder, code_folder)
+#################################################
+# main code
+#################################################
+def main():
+    limit_packages= ''
 
-# 1 Get the list of Nexus proxy repositories
-proxy_repositories = get_nexus_proxy_repositories(nexus_server_url)
+    if(len(sys.argv) > 1):
+        limit_packages = sys.argv[1]
 
-# Print the list of proxy repositories
-print("\nproxy repositories:")
-for repository in proxy_repositories:
-    print(repository)
-for repository in proxy_repositories:
-    zip_file_name = get_packages_list(repository)
-    print('\nzip file name:' + zip_file_name)
-    if(zip_file_name != ''):
-        SCA_scan_packages(repository, zip_file_name)
+    print('limit repo = ' + limit_packages)
+    # 0 clear old manifex & zip files
+    delete_files_in_folder(code_folder)
+    # copy files from the source folder to the destination folder
+    copy_files(org_code_folder, code_folder)
+
+    # 1 Get the list of Nexus proxy repositories
+    proxy_repositories = get_nexus_proxy_repositories(nexus_server_url)
+
+    # Print the list of proxy repositories
+    print("\nproxy repositories:")
+    for repository in proxy_repositories:
+        print(repository)
+    for repository in proxy_repositories:
+        if(limit_packages == '' or (limit_packages != '' and repository == limit_packages)):
+            zip_file_name = get_packages_list(repository)
+            print('\nzip file name:' + zip_file_name)
+            if(zip_file_name != ''):
+                SCA_scan_packages(repository, zip_file_name)
    
+if __name__ == '__main__':
+   main()

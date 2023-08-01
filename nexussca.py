@@ -18,6 +18,10 @@ SCA_password = config['SCA_password']
 nexus_server_url = config['nexus_server_url']
 SCA_api_url = config['SCA_api_url']
 SCA_auth_url = config['SCA_auth_url']
+SCA_proxy = config['SCA_proxy']
+proxy_servers = {
+   'https': SCA_proxy
+}
 
 # Path to the executable file
 nexus_repository_suffix = "/service/rest/v1/components?repository="
@@ -66,7 +70,7 @@ def delete_files_in_folder(folder_path):
 def get_nexus_proxy_repositories(nexus_url):
     url = f"{nexus_url}/service/rest/v1/repositories"
     try:
-        response = requests.get(url)
+        response = requests.get(url, verify=False)
         response.raise_for_status()
         data = response.json()
         proxy_repositories = [repo["name"] for repo in data if repo["type"] == "proxy"]
@@ -189,9 +193,9 @@ def get_packages_list(repository_name):
 
         while(continuationToken != None):
             if(continuationToken == ''):
-                response = requests.get(url + repository_name)
+                response = requests.get(url + repository_name, verify=False)
             else:
-                response = requests.get(url + repository_name + '&continuationToken=' + continuationToken)
+                response = requests.get(url + repository_name + '&continuationToken=' + continuationToken, verify=False)
             # Check if the request was successful (status code 200)
             if response.status_code == 200:
                 # Parse the JSON data from the response
@@ -221,7 +225,7 @@ def get_SCA_access_token():
         }
 
 #        response = requests.request("POST", SCA_auth_url, headers=headers, data=payload)
-        response = requests.request("POST", SCA_auth_url, headers=headers, data=payload, verify=False)
+        response = requests.request("POST", SCA_auth_url, headers=headers, data=payload, verify=False, proxies=proxy_servers)
 
         print('get_SCA_access_token - token = ' + response.text)
         response_json = response.json()
@@ -246,7 +250,7 @@ def SCA_create_project (access_token, project_name):
         'Authorization': 'Bearer ' + access_token
         }
 
-        response = requests.request("POST", url, headers=headers, data=payload)
+        response = requests.request("POST", url, headers=headers, data=payload, proxies=proxy_servers, verify=False)
     except Exception as e:
         print("Exception: SCA_create_project:", str(e))
         return ""
@@ -263,7 +267,7 @@ def SCA_get_project_id(access_token, project_name):
         'Authorization': 'Bearer ' + access_token
         }
 
-        response = requests.request("GET", url, headers=headers, data=payload)
+        response = requests.request("GET", url, headers=headers, data=payload, proxies=proxy_servers, verify=False)
         response_json = response.json()
     except Exception as e:
         print("Exception: SCA_get_project_id:", str(e))
@@ -284,7 +288,7 @@ def SCA_get_upload_link(access_token, project_id):
         'Authorization': 'Bearer ' + access_token
         }
 
-        response = requests.request("POST", url, headers=headers, data=payload)
+        response = requests.request("POST", url, headers=headers, data=payload, proxies=proxy_servers, verify=False)
         response_json = response.json()
     except Exception as e:
         print("Exception: SCA_get_upload_link:", str(e))
@@ -305,7 +309,7 @@ def SCA_upload_file(access_token, upload_link, zip_file_path):
             'Authorization': 'Bearer ' + access_token
             }
 
-            response = requests.request("PUT", url, headers=headers, data=payload)
+            response = requests.request("PUT", url, headers=headers, data=payload, proxies=proxy_servers, verify=False)
             print('SCA_upload_file ' + response.text)
     except Exception as e:
         print("Exception: SCA_upload_file:", str(e))
@@ -324,7 +328,7 @@ def SCA_scan_zip(access_token, project_id, upload_file_url):
         'Authorization': 'Bearer ' + access_token
         }
 
-        response = requests.request("POST", url, headers=headers, data=payload)
+        response = requests.request("POST", url, headers=headers, data=payload, proxies=proxy_servers, verify=False)
         response_json = response.json()
     except Exception as e:
         print("Exception:  SCA_scan_zip :", str(e))

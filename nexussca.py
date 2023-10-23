@@ -29,7 +29,7 @@ code_folder = './manifest'
 org_code_folder = './manifest-org'
 SCA_project_name = 'nexus_sca'
 npm_manifest = 'package.json'
-nuget_manifest = 'packages.config'
+nuget_manifest = 'nuget.csproj'
 maven_manifest = 'pom.xml'
 pypi_manifest = 'requirements.txt'
 
@@ -53,19 +53,20 @@ def copy_files(source_folder, destination_folder):
             print(f"Skipping non-file item: {source_path}")
 
 def delete_files_in_folder(folder_path):
-    try:    
-        for filename in os.listdir(folder_path):
-            file_path = os.path.join(folder_path, filename)
-            if os.path.isfile(file_path):
-                try:
-                    os.remove(file_path)
-                    print(f"Deleted file: {file_path}")
-                except Exception as e:
-                    print(f"Failed to delete file: {file_path} - {e}")
-            else:
-                print(f"Skipping non-file item: {file_path}")
+    try:
+        if os.path.exists(folder_path):    
+            for filename in os.listdir(folder_path):
+                file_path = os.path.join(folder_path, filename)
+                if os.path.isfile(file_path):
+                    try:
+                        os.remove(file_path)
+                        print(f"Deleted file: {file_path}")
+                    except Exception as e:
+                        print(f"Failed to delete file: {file_path} - {e}")
+                else:
+                    print(f"Skipping non-file item: {file_path}")
     except Exception as e:
-        print(f"Failed to delete file: {folder_path} - {e}")
+            print(f"Failed to delete file: {folder_path} - {e}")
 
 def get_nexus_proxy_repositories(nexus_url):
     url = f"{nexus_url}/service/rest/v1/repositories"
@@ -154,24 +155,19 @@ def treat_package_list(packages, format):
             # Load the existing packages.config file
             file_name = code_folder + '/' + nuget_manifest 
 
-            xml_content = ''
-            with open(file_name, 'r') as file:
-                xml_content = file.read()
+            tree = ET.parse(file_name)
+            root = tree.getroot()
+            dependencies = ET.Element('ItemGroup')
 
-            # Parse the XML content
-            root = ET.fromstring(xml_content)
-
+            # Create the dependency XML structure
             for package in packages:
-                new_package = ET.SubElement(root, 'package')
-                new_package.set('id', package["name"])
-                new_package.set('version', package["version"])
-                new_package.set('targetFramework', 'net46')
-
-            # Save the modified XML back to a string
-            modified_xml_content = ET.tostring(root, encoding='unicode')
-
-            with open(file_name, 'w') as file:
-                file.write(modified_xml_content)
+                dependency = ET.Element('PackageReference')
+                dependency.set('Include', package["name"])
+                dependency.set('Version', package["version"])
+                # Append the new dependency to the dependencies section
+                dependencies.append(dependency)
+            root.append(dependencies)
+            tree.write(file_name)
 
             zip_file_name = file_name + '.zip'
             zip_file(file_name, zip_file_name)
@@ -313,7 +309,6 @@ def SCA_upload_file(access_token, upload_link, zip_file_path):
             print('SCA_upload_file ' + response.text)
     except Exception as e:
         print("Exception: SCA_upload_file:", str(e))
-
 
 def SCA_scan_zip(access_token, project_id, upload_file_url):
     url = SCA_api_url + "/scan-runner/scans/uploaded-zip"

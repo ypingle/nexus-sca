@@ -103,8 +103,8 @@ def treat_package_list(packages, format):
                 data = json.load(file)
 
             # Update the dependencies in package.json
-            if 'dependencies' not in data:
-                data['dependencies'] = {}
+#            if 'dependencies' not in data:
+            data['dependencies'] = {}
 
             for package in packages:
                 data['dependencies'][package['name']] = package['version']
@@ -118,7 +118,7 @@ def treat_package_list(packages, format):
 
         if format == 'pypi':
             file_name = code_folder + '/' + pypi_manifest
-            with open(file_name, 'a') as file:
+            with open(file_name, 'w') as file:
                 # Write each package and version in the correct format
                 for package in packages:
                     file.write(f"{package['name']}=={package['version']}\n")       

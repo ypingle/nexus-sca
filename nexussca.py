@@ -1,10 +1,10 @@
-import json
+import parse_json_store
 import requests
 import xml.etree.ElementTree as ET
 import os
-import shutil
 import zipfile
 import yaml
+import json
 import sys
 
 # Open the YAML file
@@ -26,47 +26,8 @@ proxy_servers = {
 # Path to the executable file
 nexus_repository_suffix = "/service/rest/v1/components?repository="
 code_folder = './manifest'
-org_code_folder = './manifest-org'
 SCA_project_name = 'nexus_sca'
-npm_manifest = 'package.json'
-nuget_manifest = 'nuget.csproj'
 maven_manifest = 'pom.xml'
-pypi_manifest = 'requirements.txt'
-
-def copy_files(source_folder, destination_folder):
-    # Create the destination folder if it doesn't exist
-    os.makedirs(destination_folder, exist_ok=True)
-    
-    # Iterate over each item in the source folder
-    for filename in os.listdir(source_folder):
-        source_path = os.path.join(source_folder, filename)
-        destination_path = os.path.join(destination_folder, filename)
-        
-        # Check if the item is a file
-        if os.path.isfile(source_path):
-            try:
-                shutil.copy2(source_path, destination_path)
-                print(f"Copied file: {source_path} -> {destination_path}")
-            except Exception as e:
-                print(f"Failed to copy file: {source_path} - {e}")
-        else:
-            print(f"Skipping non-file item: {source_path}")
-
-def delete_files_in_folder(folder_path):
-    try:
-        if os.path.exists(folder_path):    
-            for filename in os.listdir(folder_path):
-                file_path = os.path.join(folder_path, filename)
-                if os.path.isfile(file_path):
-                    try:
-                        os.remove(file_path)
-                        print(f"Deleted file: {file_path}")
-                    except Exception as e:
-                        print(f"Failed to delete file: {file_path} - {e}")
-                else:
-                    print(f"Skipping non-file item: {file_path}")
-    except Exception as e:
-            print(f"Failed to delete file: {folder_path} - {e}")
 
 def get_nexus_proxy_repositories(nexus_url):
     url = f"{nexus_url}/service/rest/v1/repositories"
@@ -84,46 +45,13 @@ def zip_file(source_file, zip_file_name):
     with zipfile.ZipFile(zip_file_name, 'w', zipfile.ZIP_DEFLATED) as zipf:
         zipf.write(source_file, arcname=source_file)
 
-def add_dependency(xml_content, group_id, artifact_id, version):
-    root = ET.fromstring(xml_content)
-    dependencies = root.find(".//{http://maven.apache.org/POM/4.0.0}dependencies")
-
-    new_dependency = ET.SubElement(dependencies, "dependency")
-    ET.SubElement(new_dependency, "groupId").text = group_id
-    ET.SubElement(new_dependency, "artifactId").text = artifact_id
-    ET.SubElement(new_dependency, "version").text = version
-
-    return ET.tostring(root, encoding="unicode")
-
 def treat_package_list(packages, format):
     try:
-        if format == 'npm':
-            file_name = code_folder + '/' + npm_manifest
-            with open(file_name, 'r') as file:
-                data = json.load(file)
 
-            # Update the dependencies in package.json
-#            if 'dependencies' not in data:
-            data['dependencies'] = {}
-
-            for package in packages:
-                data['dependencies'][package['name']] = package['version']
-
-            # Save the updated package.json file
-            with open(file_name, 'w') as file:
-                json.dump(data, file, indent=2)
-
-            zip_file_name = file_name + '.zip'
-            zip_file(file_name, zip_file_name)
-
-        if format == 'pypi':
-            file_name = code_folder + '/' + pypi_manifest
-            with open(file_name, 'w') as file:
-                # Write each package and version in the correct format
-                for package in packages:
-                    file.write(f"{package['name']}=={package['version']}\n")       
-            zip_file_name = file_name + '.zip'
-            zip_file(file_name, zip_file_name)
+        file_name = os.getcwd() +'\manifest'
+        file_name = str(parse_json_store.create_package(packages, file_name, format))
+        zip_file_name = str(file_name) + '.zip'
+        zip_file(file_name, zip_file_name)
 
         if format == 'maven2':
             # Load the existing pom.xml file
@@ -151,26 +79,6 @@ def treat_package_list(packages, format):
             zip_file_name = file_name + '.zip'
             zip_file(file_name, zip_file_name)
 
-        if format == 'nuget':
-            # Load the existing packages.config file
-            file_name = code_folder + '/' + nuget_manifest 
-
-            tree = ET.parse(file_name)
-            root = tree.getroot()
-            dependencies = ET.Element('ItemGroup')
-
-            # Create the dependency XML structure
-            for package in packages:
-                dependency = ET.Element('PackageReference')
-                dependency.set('Include', package["name"])
-                dependency.set('Version', package["version"])
-                # Append the new dependency to the dependencies section
-                dependencies.append(dependency)
-            root.append(dependencies)
-            tree.write(file_name)
-
-            zip_file_name = file_name + '.zip'
-            zip_file(file_name, zip_file_name)
     except Exception as e:
         print("Exception: treat_packages_list:", str(e))
         return ""
@@ -179,60 +87,73 @@ def treat_package_list(packages, format):
 
 def get_packages_list(repository_name):
     try:
-        url = nexus_server_url +  nexus_repository_suffix
-        zip_file_name = ''
-        continuationToken = ''
-        short_packages = []
+        url = nexus_server_url + nexus_repository_suffix
+        continuation_token = ''
+        dependencies = {}
 
         print("\n")
         print(repository_name + " packages:")
 
-        while(continuationToken != None):
-            if(continuationToken == ''):
+        while continuation_token is not None:
+            if continuation_token == '':
                 response = requests.get(url + repository_name, verify=False)
             else:
-                response = requests.get(url + repository_name + '&continuationToken=' + continuationToken, verify=False)
+                response = requests.get(url + repository_name + '&continuationToken=' + continuation_token, verify=False)
+            
             # Check if the request was successful (status code 200)
             if response.status_code == 200:
                 # Parse the JSON data from the response
-                packages = response.json()['items']
-                format = packages[0]['format']
-                continuationToken = response.json()['continuationToken']
+                data = response.json()
+                packages = data.get('items', [])
+                if not packages:
+                    break
+                
+                file_format = packages[0].get('format', '')
+                continuation_token = data.get('continuationToken')
 
                 for package in packages:
                     print(package['name'] + ' ' + package['version'])
+                    dependencies[package['name']] = package['version']
+        return dependencies, file_format
 
-                    package_info = {"name": package['name'], "version": package['version'], "group": package['group']}
-                    short_packages.append(package_info)
+    except requests.RequestException as e:
+        print("Request Exception:", e)
+        return None, None
 
-        zip_file_name = treat_package_list(short_packages, format)
+    except KeyError as e:
+        print("KeyError:", e)
+        return None, None
 
     except Exception as e:
-        print("Exception: get_packages_list:", str(e))
-        return ""
-    else:
-        return zip_file_name
+        print("Exception:", e)
+        return None, None
 
-def get_SCA_access_token():
+def get_SCA_access_token(SCA_username, SCA_password, SCA_account, SCA_auth_url, proxy_servers=None):
     try:
-        payload = 'username=' + SCA_username + '&password=' + SCA_password + '&acr_values=Tenant:' + SCA_account + '&scope=sca_api&client_id=sca_resource_owner&grant_type=password'
+        payload = {
+            'username': SCA_username,
+            'password': SCA_password,
+            'acr_values': 'Tenant:' + SCA_account,
+            'scope': 'sca_api',
+            'client_id': 'sca_resource_owner',
+            'grant_type': 'password'
+        }
+        
         headers = {
-        'Content-Type': 'application/x-www-form-urlencoded'
+            'Content-Type': 'application/x-www-form-urlencoded'
         }
 
-#        response = requests.request("POST", SCA_auth_url, headers=headers, data=payload)
-        response = requests.request("POST", SCA_auth_url, headers=headers, data=payload, verify=False, proxies=proxy_servers)
+        response = requests.post(SCA_auth_url, headers=headers, data=payload, verify=False, proxies=proxy_servers)
 
         print('get_SCA_access_token - token = ' + response.text)
-        response_json = response.json()
-        access_token = response_json['access_token']
-    except Exception as e:
-        print("Exception: get access token failed:", str(e))
-        return ""
-    else:
+        response.raise_for_status()  # Raise an HTTPError for bad responses
+        access_token = response.json()['access_token']
         return access_token
+    except requests.RequestException as e:
+        print("Exception: Failed to get access token:", str(e))
+        return ""
 
-def SCA_create_project (access_token, project_name):
+def SCA_create_project(access_token, project_name, SCA_api_url, proxy_servers=None):
     url = SCA_api_url + "/risk-management/projects"
 
     try:
@@ -247,128 +168,157 @@ def SCA_create_project (access_token, project_name):
         }
 
         response = requests.request("POST", url, headers=headers, data=payload, proxies=proxy_servers, verify=False)
+        response.raise_for_status()  # Raise an error for bad responses
+
+        response_json = response.json()
+        project_id = response_json['id']  # Assuming the first project with the given name is returned
     except Exception as e:
         print("Exception: SCA_create_project:", str(e))
         return ""
     else:
         print('SCA_create_project - project_name= ' + response.text)
-        return(response.text)
+        return project_id
 
-def SCA_get_project_id(access_token, project_name):
-    url = SCA_api_url + "/risk-management/projects?name=" + project_name
-
-    try:
-        payload = {}
-        headers = {
-        'Authorization': 'Bearer ' + access_token
-        }
-
-        response = requests.request("GET", url, headers=headers, data=payload, proxies=proxy_servers, verify=False)
-        response_json = response.json()
-    except Exception as e:
-        print("Exception: SCA_get_project_id:", str(e))
-        return ""
-    else:
-        print('SCA_get_project_id id= ' + response_json['id'])
-        return response_json['id']
-
-def SCA_get_upload_link(access_token, project_id):
-    url = SCA_api_url + "/scan-runner/scans/generate-upload-link"
+def SCA_get_project_id(access_token, project_name, SCA_api_url, proxy_servers=None):
+    url = f"{SCA_api_url}/risk-management/projects?name={project_name}"
 
     try:
-        payload = json.dumps({
-        "projectId": project_id
-        })
         headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + access_token
+            'Authorization': 'Bearer ' + access_token
         }
 
-        response = requests.request("POST", url, headers=headers, data=payload, proxies=proxy_servers, verify=False)
+        response = requests.get(url, headers=headers, proxies=proxy_servers, verify=False)
+        response.raise_for_status()  # Raise an error for bad responses
+
         response_json = response.json()
-    except Exception as e:
-        print("Exception: SCA_get_upload_link:", str(e))
+        project_id = response_json['id']  # Assuming the first project with the given name is returned
+    except requests.RequestException as e:
+        print("Exception: Failed to get project ID:", str(e))
+        return ""
+    except (KeyError, IndexError):
+        print("Exception: Project ID not found")
         return ""
     else:
-        print('SCA_get_upload_link - uploadUrl= ' + response_json['uploadUrl'])
-        return response_json['uploadUrl']
+        print('SCA_get_project_id id:', project_id)
+        return project_id
 
-def SCA_upload_file(access_token, upload_link, zip_file_path):
-    url = upload_link
+def SCA_get_upload_link(access_token, project_id, SCA_api_url, proxy_servers=None):
+    url = f"{SCA_api_url}/scan-runner/scans/generate-upload-link"
 
+    try:
+        payload = {
+            "projectId": project_id
+        }
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + access_token
+        }
+
+        response = requests.post(url, headers=headers, json=payload, proxies=proxy_servers, verify=False)
+        response.raise_for_status()  # Raise an error for bad responses
+
+        response_json = response.json()
+        upload_url = response_json.get('uploadUrl')
+    except requests.RequestException as e:
+        print("Exception: Failed to get upload link:", str(e))
+        return ""
+    except KeyError:
+        print("Exception: 'uploadUrl' key not found in response")
+        return ""
+    else:
+        print('SCA_get_upload_link - uploadUrl:', upload_url)
+        return upload_url
+
+def SCA_upload_file(access_token, upload_link, zip_file_path, proxy_servers=None):
     try:
         with open(zip_file_path, 'rb') as file:
-            payload = file
             headers = {
-            'Accept': 'application/json',
-            'Content-Type': 'application/x-zip-compressed',
-            'Authorization': 'Bearer ' + access_token
+                'Accept': 'application/json',
+                'Content-Type': 'application/x-zip-compressed',
+                'Authorization': 'Bearer ' + access_token
             }
+            response = requests.put(upload_link, headers=headers, data=file, proxies=proxy_servers, verify=False)
+            response.raise_for_status()  # Raise an error for bad responses
+            print('SCA_upload_file:', response.text)
+    except requests.RequestException as e:
+        print("Exception: Failed to upload file:", str(e))
 
-            response = requests.request("PUT", url, headers=headers, data=payload, proxies=proxy_servers, verify=False)
-            print('SCA_upload_file ' + response.text)
-    except Exception as e:
-        print("Exception: SCA_upload_file:", str(e))
-
-def SCA_scan_zip(access_token, project_id, upload_file_url):
-    url = SCA_api_url + "/scan-runner/scans/uploaded-zip"
+def SCA_scan_zip(access_token, project_id, upload_file_url, SCA_api_url, proxy_servers=None):
+    url = f"{SCA_api_url}/scan-runner/scans/uploaded-zip"
 
     try:
-        payload = json.dumps({
+        payload = {
             "projectId": project_id,
-            "uploadedFileUrl" : upload_file_url
-        })
+            "uploadedFileUrl": upload_file_url
+        }
         headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + access_token
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + access_token
         }
 
-        response = requests.request("POST", url, headers=headers, data=payload, proxies=proxy_servers, verify=False)
-        response_json = response.json()
-    except Exception as e:
-        print("Exception:  SCA_scan_zip :", str(e))
-    else:
-        print('SCA_scan_zip scan_id = ' + response_json['scanId'])
-        return response_json['scanId']
+        response = requests.post(url, headers=headers, json=payload, proxies=proxy_servers, verify=False)
+        response.raise_for_status()  # Raise an error for bad responses
 
-def SCA_scan_packages(repository, zip_manifest_file):
-    access_token = get_SCA_access_token()
-    if(access_token != ""):
+        response_json = response.json()
+        print('SCA_scan_zip scan_id:', response_json['scanId'])
+        return response_json['scanId']
+    except requests.RequestException as e:
+        print("Exception: Failed to initiate scan:", str(e))
+        return None
+    except KeyError:
+        print("Exception: 'scanId' key not found in response")
+        return None
+
+def SCA_scan_packages(repository, zip_manifest_file, SCA_auth_url, SCA_api_url, proxy_servers=None):
+    access_token = get_SCA_access_token(SCA_username, SCA_password, SCA_account, SCA_auth_url, proxy_servers=None)
+    if access_token:
         project_name = SCA_project_name + '_' + repository
-        SCA_create_project(access_token, project_name)
-        project_id = SCA_get_project_id(access_token, project_name)
-        upload_file_url = SCA_get_upload_link(access_token, project_id)
-        SCA_upload_file(access_token, upload_file_url, zip_manifest_file)
-        scan_id = SCA_scan_zip(access_token, project_id, upload_file_url)
+        project_id = SCA_get_project_id(access_token, project_name, SCA_api_url, proxy_servers)
+        if (project_id == ''):
+            project_id = SCA_create_project(access_token, project_name, SCA_api_url, proxy_servers=None)
+        if project_id:
+            upload_file_url = SCA_get_upload_link(access_token, project_id, SCA_api_url, proxy_servers)
+            if upload_file_url:
+                SCA_upload_file(access_token, upload_file_url, zip_manifest_file, proxy_servers)
+                scan_id = SCA_scan_zip(access_token, project_id, upload_file_url, SCA_api_url, proxy_servers)
+                return scan_id
+    return None
 
 #################################################
 # main code
 #################################################
 def main():
-    limit_packages= ''
+    # Set a default value for limit_packages
+    limit_repo = ''
 
-    if(len(sys.argv) > 1):
-        limit_packages = sys.argv[1]
+    # Check if command-line arguments were provided
+    if len(sys.argv) > 1:
+        limit_repo = sys.argv[1]
 
-    print('limit repo = ' + limit_packages)
-    # 0 clear old manifex & zip files
-    delete_files_in_folder(code_folder)
-    # copy files from the source folder to the destination folder
-    copy_files(org_code_folder, code_folder)
+    print('limit repo =', limit_repo)
 
-    # 1 Get the list of Nexus proxy repositories
+    # 1. Get the list of Nexus proxy repositories
     proxy_repositories = get_nexus_proxy_repositories(nexus_server_url)
 
     # Print the list of proxy repositories
     print("\nproxy repositories:")
     for repository in proxy_repositories:
         print(repository)
+
+    # Iterate through each repository
     for repository in proxy_repositories:
-        if(limit_packages == '' or (limit_packages != '' and repository == limit_packages)):
-            zip_file_name = get_packages_list(repository)
-            print('\nzip file name:' + zip_file_name)
-            if(zip_file_name != ''):
-                SCA_scan_packages(repository, zip_file_name)
-   
+        # Check if limit_packages is empty or matches the current repository
+        if not limit_repo or repository == limit_repo:
+            # Get the list of packages for the current repository
+            packages_list, format = get_packages_list(repository)
+            
+            # Treat the package list to create a zip file
+            zip_file_name = treat_package_list(packages_list, format)
+            print('\nzip file name:', zip_file_name)
+            
+            # If zip file is generated, proceed with scanning
+            if zip_file_name:
+                SCA_scan_packages(repository, zip_file_name, SCA_auth_url, SCA_api_url, proxy_servers)
+ 
 if __name__ == '__main__':
    main()

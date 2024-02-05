@@ -27,7 +27,6 @@ proxy_servers = {
 nexus_repository_suffix = "/service/rest/v1/components?repository="
 code_folder = './manifest'
 SCA_project_name = 'nexus_sca'
-maven_manifest = 'pom.xml'
 
 def get_nexus_proxy_repositories(nexus_url):
     url = f"{nexus_url}/service/rest/v1/repositories"
@@ -52,32 +51,6 @@ def treat_package_list(packages, format):
         file_name = str(parse_json_store.create_package(packages, file_name, format))
         zip_file_name = str(file_name) + '.zip'
         zip_file(file_name, zip_file_name)
-
-        if format == 'maven2':
-            # Load the existing pom.xml file
-            file_name = code_folder + '/' + maven_manifest 
-
-            tree = ET.parse(file_name)
-            root = tree.getroot()
-            dependencies = ET.Element('dependencies')
-
-            # Create the dependency XML structure
-            for package in packages:
-                dependency = ET.Element('dependency')
-                groupId = ET.SubElement(dependency, 'groupId')
-                groupId.text = package["group"]
-                artifactId = ET.SubElement(dependency, 'artifactId')
-                artifactId.text = package["name"]
-                version = ET.SubElement(dependency, 'version')
-                version.text = package["version"]
-                # Append the new dependency to the dependencies section
-                dependencies.append(dependency)
-            root.append(dependencies)
-
-            # Save the modified pom.xml file
-            tree.write(file_name)
-            zip_file_name = file_name + '.zip'
-            zip_file(file_name, zip_file_name)
 
     except Exception as e:
         print("Exception: treat_packages_list:", str(e))
@@ -113,7 +86,10 @@ def get_packages_list(repository_name):
 
                 for package in packages:
                     print(package['name'] + ' ' + package['version'])
-                    dependencies[package['name']] = package['version']
+                    if(file_format == 'maven2'):
+                        dependencies[package['name']] = package['version'] + '|' + package['group']
+                    else:    
+                        dependencies[package['name']] = package['version'] 
         return dependencies, file_format
 
     except requests.RequestException as e:

@@ -7,12 +7,14 @@ def create_package(dependencies, file_path, manifest):
     manifest_functions = {
         'npm': create_npm_package_json,
         'nuget': create_nuget_csproj,
-        'pypi': create_pypi_requirements_txt
+        'pypi': create_pypi_requirements_txt,
+        'maven2': create_maven_pom_xml
     }
     manifest_files = {
         'npm': 'package.json',
         'nuget': 'nuget.csproj',
-        'pypi': 'requirements.txt'
+        'pypi': 'requirements.txt',
+        'maven2': 'pom.xml'
     }
 
     if manifest in manifest_functions:
@@ -84,3 +86,53 @@ def create_pypi_requirements_txt(dependencies, output_file_path):
         print(f"Error: {e}", file=sys.stderr)
     else:
         print(f"Created new requirements file with pypi dependencies: {output_file_path}")
+
+def create_maven_pom_xml(dependencies, output_file_path):
+    try:
+        # Create the root element for the pom.xml file
+        root = ET.Element('project')
+        root.set('xmlns', 'http://maven.apache.org/POM/4.0.0')
+
+        # Add the modelVersion and groupId elements
+        model_version = ET.SubElement(root, 'modelVersion')
+        model_version.text = '4.0.0'
+
+        group_id = ET.SubElement(root, 'groupId')
+        group_id.text = 'org.openjfx'  
+
+        artifact_id = ET.SubElement(root, 'artifactId')
+        artifact_id.text = 'hellofx'
+
+        packaging_id = ET.SubElement(root, 'packaging')
+        packaging_id.text = 'jar'
+
+        version_id = ET.SubElement(root, 'version')
+        version_id.text = '1.0-SNAPSHOT'
+
+        name_id = ET.SubElement(root, 'name')
+        name_id.text = 'demo'
+
+        url_id = ET.SubElement(root, 'url')
+        url_id.text = 'http://maven.apache.org'
+
+        # Add the dependencies element
+        dependencies_element = ET.SubElement(root, 'dependencies')
+
+        # Add each dependency to the XML tree
+        for artifact_id, version in dependencies.items():
+            split_result = version.split('|')
+            if(split_result[0].count('.') == 2):
+                new_dependency = ET.SubElement(dependencies_element, 'dependency')
+                ET.SubElement(new_dependency, 'groupId').text = split_result[1]
+                ET.SubElement(new_dependency, 'artifactId').text = artifact_id
+                ET.SubElement(new_dependency, 'version').text = split_result[0]
+
+        # Create an ElementTree object
+        tree = ET.ElementTree(root)
+
+        # Write the XML tree to the pom.xml file
+        tree.write(output_file_path, encoding='utf-8', xml_declaration=True)
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+    else:
+        print(f"Created new pom.xml file with maven dependencies: {output_file_path}")

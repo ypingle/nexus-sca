@@ -1,10 +1,9 @@
 import parse_json_store
+import SCA_api
 import requests
-import xml.etree.ElementTree as ET
 import os
 import zipfile
 import yaml
-import json
 import sys
 
 # Open the YAML file
@@ -89,7 +88,13 @@ def get_packages_list(repository_name):
                     if(file_format == 'maven2'):
                         dependencies[package['name']] = package['version'] + '|' + package['group']
                     else:    
-                        dependencies[package['name']] = package['version'] 
+                        if(file_format == 'npm'):
+                            if package['group'] is not None:
+                                dependencies['@' + package['group'] + '/' + package['name']] = package['version']
+                            else:                                
+                                dependencies[package['name']] = package['version'] 
+                        else:
+                            dependencies[package['name']] = package['version'] 
         return dependencies, file_format
 
     except requests.RequestException as e:
@@ -104,159 +109,18 @@ def get_packages_list(repository_name):
         print("Exception:", e)
         return None, None
 
-def get_SCA_access_token(SCA_username, SCA_password, SCA_account, SCA_auth_url, proxy_servers=None):
-    try:
-        payload = {
-            'username': SCA_username,
-            'password': SCA_password,
-            'acr_values': 'Tenant:' + SCA_account,
-            'scope': 'sca_api',
-            'client_id': 'sca_resource_owner',
-            'grant_type': 'password'
-        }
-        
-        headers = {
-            'Content-Type': 'application/x-www-form-urlencoded'
-        }
-
-        response = requests.post(SCA_auth_url, headers=headers, data=payload, verify=False, proxies=proxy_servers)
-
-        print('get_SCA_access_token - token = ' + response.text)
-        response.raise_for_status()  # Raise an HTTPError for bad responses
-        access_token = response.json()['access_token']
-        return access_token
-    except requests.RequestException as e:
-        print("Exception: Failed to get access token:", str(e))
-        return ""
-
-def SCA_create_project(access_token, project_name, SCA_api_url, proxy_servers=None):
-    url = SCA_api_url + "/risk-management/projects"
-
-    try:
-        payload = json.dumps({
-        "Name": project_name,
-        "AssignedTeams": [],
-        "additionalProp1": {}
-        })
-        headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + access_token
-        }
-
-        response = requests.request("POST", url, headers=headers, data=payload, proxies=proxy_servers, verify=False)
-        response.raise_for_status()  # Raise an error for bad responses
-
-        response_json = response.json()
-        project_id = response_json['id']  # Assuming the first project with the given name is returned
-    except Exception as e:
-        print("Exception: SCA_create_project:", str(e))
-        return ""
-    else:
-        print('SCA_create_project - project_name= ' + response.text)
-        return project_id
-
-def SCA_get_project_id(access_token, project_name, SCA_api_url, proxy_servers=None):
-    url = f"{SCA_api_url}/risk-management/projects?name={project_name}"
-
-    try:
-        headers = {
-            'Authorization': 'Bearer ' + access_token
-        }
-
-        response = requests.get(url, headers=headers, proxies=proxy_servers, verify=False)
-        response.raise_for_status()  # Raise an error for bad responses
-
-        response_json = response.json()
-        project_id = response_json['id']  # Assuming the first project with the given name is returned
-    except requests.RequestException as e:
-        print("Exception: Failed to get project ID:", str(e))
-        return ""
-    except (KeyError, IndexError):
-        print("Exception: Project ID not found")
-        return ""
-    else:
-        print('SCA_get_project_id id:', project_id)
-        return project_id
-
-def SCA_get_upload_link(access_token, project_id, SCA_api_url, proxy_servers=None):
-    url = f"{SCA_api_url}/scan-runner/scans/generate-upload-link"
-
-    try:
-        payload = {
-            "projectId": project_id
-        }
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + access_token
-        }
-
-        response = requests.post(url, headers=headers, json=payload, proxies=proxy_servers, verify=False)
-        response.raise_for_status()  # Raise an error for bad responses
-
-        response_json = response.json()
-        upload_url = response_json.get('uploadUrl')
-    except requests.RequestException as e:
-        print("Exception: Failed to get upload link:", str(e))
-        return ""
-    except KeyError:
-        print("Exception: 'uploadUrl' key not found in response")
-        return ""
-    else:
-        print('SCA_get_upload_link - uploadUrl:', upload_url)
-        return upload_url
-
-def SCA_upload_file(access_token, upload_link, zip_file_path, proxy_servers=None):
-    try:
-        with open(zip_file_path, 'rb') as file:
-            headers = {
-                'Accept': 'application/json',
-                'Content-Type': 'application/x-zip-compressed',
-                'Authorization': 'Bearer ' + access_token
-            }
-            response = requests.put(upload_link, headers=headers, data=file, proxies=proxy_servers, verify=False)
-            response.raise_for_status()  # Raise an error for bad responses
-            print('SCA_upload_file:', response.text)
-    except requests.RequestException as e:
-        print("Exception: Failed to upload file:", str(e))
-
-def SCA_scan_zip(access_token, project_id, upload_file_url, SCA_api_url, proxy_servers=None):
-    url = f"{SCA_api_url}/scan-runner/scans/uploaded-zip"
-
-    try:
-        payload = {
-            "projectId": project_id,
-            "uploadedFileUrl": upload_file_url
-        }
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + access_token
-        }
-
-        response = requests.post(url, headers=headers, json=payload, proxies=proxy_servers, verify=False)
-        response.raise_for_status()  # Raise an error for bad responses
-
-        response_json = response.json()
-        print('SCA_scan_zip scan_id:', response_json['scanId'])
-        return response_json['scanId']
-    except requests.RequestException as e:
-        print("Exception: Failed to initiate scan:", str(e))
-        return None
-    except KeyError:
-        print("Exception: 'scanId' key not found in response")
-        return None
-
 def SCA_scan_packages(repository, zip_manifest_file, SCA_auth_url, SCA_api_url, proxy_servers=None):
-    access_token = get_SCA_access_token(SCA_username, SCA_password, SCA_account, SCA_auth_url, proxy_servers=None)
+    access_token = SCA_api.get_SCA_access_token(SCA_username, SCA_password, SCA_account, SCA_auth_url, proxy_servers=None)
     if access_token:
         project_name = SCA_project_name + '_' + repository
-        project_id = SCA_get_project_id(access_token, project_name, SCA_api_url, proxy_servers)
+        project_id = SCA_api.SCA_get_project_id(access_token, project_name, SCA_api_url, proxy_servers)
         if (project_id == ''):
-            project_id = SCA_create_project(access_token, project_name, SCA_api_url, proxy_servers=None)
+            project_id = SCA_api.SCA_create_project(access_token, project_name, SCA_api_url, proxy_servers=None)
         if project_id:
-            upload_file_url = SCA_get_upload_link(access_token, project_id, SCA_api_url, proxy_servers)
+            upload_file_url = SCA_api.SCA_get_upload_link(access_token, project_id, SCA_api_url, proxy_servers)
             if upload_file_url:
-                SCA_upload_file(access_token, upload_file_url, zip_manifest_file, proxy_servers)
-                scan_id = SCA_scan_zip(access_token, project_id, upload_file_url, SCA_api_url, proxy_servers)
+                SCA_api.SCA_upload_file(access_token, upload_file_url, zip_manifest_file, proxy_servers)
+                scan_id = SCA_api.SCA_scan_zip(access_token, project_id, upload_file_url, SCA_api_url, proxy_servers)
                 return scan_id
     return None
 

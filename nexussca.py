@@ -110,12 +110,12 @@ def get_packages_list(repository_name):
         return None, None
 
 def SCA_scan_packages(repository, zip_manifest_file, SCA_auth_url, SCA_api_url, proxy_servers=None):
-    access_token = SCA_api.get_SCA_access_token(SCA_username, SCA_password, SCA_account, SCA_auth_url, proxy_servers=None)
+    access_token = SCA_api.get_SCA_access_token(SCA_username, SCA_password, SCA_account, SCA_auth_url, proxy_servers)
     if access_token:
         project_name = SCA_project_name + '_' + repository
         project_id = SCA_api.SCA_get_project_id(access_token, project_name, SCA_api_url, proxy_servers)
         if (project_id == ''):
-            project_id = SCA_api.SCA_create_project(access_token, project_name, SCA_api_url, proxy_servers=None)
+            project_id = SCA_api.SCA_create_project(access_token, project_name, SCA_api_url, proxy_servers)
         if project_id:
             upload_file_url = SCA_api.SCA_get_upload_link(access_token, project_id, SCA_api_url, proxy_servers)
             if upload_file_url:

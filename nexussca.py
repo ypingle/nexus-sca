@@ -5,6 +5,7 @@ import os
 import zipfile
 import yaml
 import sys
+from packaging import version
 
 # Open the YAML file
 with open('config.yaml', 'r') as file:
@@ -85,16 +86,30 @@ def get_packages_list(repository_name):
 
                 for package in packages:
                     print(package['name'] + ' ' + package['version'])
+                    package_name = package['name']
+                    package_version = package['version']
+                    
                     if(file_format == 'maven2'):
                         dependencies[package['name']] = package['version'] + '|' + package['group']
-                    else:    
-                        if(file_format == 'npm'):
-                            if package['group'] is not None:
-                                dependencies['@' + package['group'] + '/' + package['name']] = package['version']
-                            else:                                
-                                dependencies[package['name']] = package['version'] 
+                    elif file_format == 'npm':
+                        if package['group'] is not None:
+                            dependency_key = '@' + package['group'] + '/' + package_name
                         else:
-                            dependencies[package['name']] = package['version'] 
+                            dependency_key = package_name
+                        dependency_value = package_version
+                    else:
+                        dependency_key = package_name
+                        dependency_value = package_version
+                    
+                    # Check if the package already exists in the dependencies dictionary
+                    if dependency_key in dependencies:
+                        existing_version = dependencies[dependency_key].split('|')[0] if '|' in dependencies[dependency_key] else dependencies[dependency_key]
+                        # Update only if the new version is older
+                        if version.parse(package_version) < version.parse(existing_version):
+                            dependencies[dependency_key] = dependency_value
+                    else:
+                        dependencies[dependency_key] = dependency_value
+
         return dependencies, file_format
 
     except requests.RequestException as e:
@@ -130,7 +145,7 @@ def SCA_scan_packages(repository, zip_manifest_file, SCA_auth_url, SCA_api_url, 
 def main():
     # Set a default value for limit_packages
     limit_repo = ''
-
+ 
     # Check if command-line arguments were provided
     if len(sys.argv) > 1:
         limit_repo = sys.argv[1]

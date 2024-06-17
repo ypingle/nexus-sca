@@ -5,7 +5,6 @@ import os
 import zipfile
 import yaml
 import sys
-from packaging import version
 
 # Open the YAML file
 with open('config.yaml', 'r') as file:
@@ -58,6 +57,9 @@ def treat_package_list(packages, format):
     else:
         return zip_file_name
 
+def version_tuple(version):
+    return tuple(map(int, (version.split("."))))
+
 def get_packages_list(repository_name):
     try:
         url = nexus_server_url + nexus_repository_suffix
@@ -105,12 +107,11 @@ def get_packages_list(repository_name):
                     if dependency_key in dependencies:
                         existing_version = dependencies[dependency_key].split('|')[0] if '|' in dependencies[dependency_key] else dependencies[dependency_key]
                         # Update only if the new version is older
-                        if version.parse(package_version) < version.parse(existing_version):
+                        if version_tuple(package_version) < version_tuple(existing_version):
                             dependencies[dependency_key] = dependency_value
                     else:
                         dependencies[dependency_key] = dependency_value
-
-        return dependencies, file_format
+                        return dependencies, file_format
 
     except requests.RequestException as e:
         print("Request Exception:", e)

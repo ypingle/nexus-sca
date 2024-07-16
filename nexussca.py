@@ -1,26 +1,12 @@
 import parse_json_store
 import SCA_api
+from SCA_api import nexus_server_url, SCA_auth_url, SCA_api_url, proxy_servers 
 import requests
 import os
 import zipfile
-import yaml
 import sys
-
-# Open the YAML file
-with open('config.yaml', 'r') as file:
-    # Load the YAML contents
-    config = yaml.safe_load(file)
-
-SCA_account = config['SCA_account']
-SCA_username = config['SCA_username']
-SCA_password = config['SCA_password']
-nexus_server_url = config['nexus_server_url']
-SCA_api_url = config['SCA_api_url']
-SCA_auth_url = config['SCA_auth_url']
-SCA_proxy = config['SCA_proxy']
-proxy_servers = {
-   'https': SCA_proxy
-}
+import argparse
+from packaging.version import parse as version_parse
 
 # Path to the executable file
 nexus_repository_suffix = "/service/rest/v1/components?repository="
@@ -56,9 +42,6 @@ def treat_package_list(packages, format):
         return ""
     else:
         return zip_file_name
-
-def version_tuple(version):
-    return tuple(map(int, (version.split("."))))
 
 def get_packages_list(repository_name):
     try:
@@ -107,11 +90,12 @@ def get_packages_list(repository_name):
                     if dependency_key in dependencies:
                         existing_version = dependencies[dependency_key].split('|')[0] if '|' in dependencies[dependency_key] else dependencies[dependency_key]
                         # Update only if the new version is older
-                        if version_tuple(package_version) < version_tuple(existing_version):
+                        if version_parse(package_version) < version_parse(existing_version):
                             dependencies[dependency_key] = dependency_value
                     else:
                         dependencies[dependency_key] = dependency_value
-                        return dependencies, file_format
+
+        return dependencies, file_format
 
     except requests.RequestException as e:
         print("Request Exception:", e)
@@ -125,33 +109,34 @@ def get_packages_list(repository_name):
         print("Exception:", e)
         return None, None
 
-def SCA_scan_packages(repository, zip_manifest_file, SCA_auth_url, SCA_api_url, proxy_servers=None):
-    access_token = SCA_api.get_SCA_access_token(SCA_username, SCA_password, SCA_account, SCA_auth_url, proxy_servers)
-    if access_token:
-        project_name = SCA_project_name + '_' + repository
-        project_id = SCA_api.SCA_get_project_id(access_token, project_name, SCA_api_url, proxy_servers)
-        if (project_id == ''):
-            project_id = SCA_api.SCA_create_project(access_token, project_name, SCA_api_url, proxy_servers)
-        if project_id:
-            upload_file_url = SCA_api.SCA_get_upload_link(access_token, project_id, SCA_api_url, proxy_servers)
-            if upload_file_url:
-                SCA_api.SCA_upload_file(access_token, upload_file_url, zip_manifest_file, proxy_servers)
-                scan_id = SCA_api.SCA_scan_zip(access_token, project_id, upload_file_url, SCA_api_url, proxy_servers)
-                return scan_id
-    return None
-
 #################################################
 # main code
 #################################################
 def main():
-    # Set a default value for limit_packages
-    limit_repo = ''
- 
-    # Check if command-line arguments were provided
-    if len(sys.argv) > 1:
-        limit_repo = sys.argv[1]
-
+    # Create the parser
+    parser = argparse.ArgumentParser(description="Process some parameters.")
+    
+    # Add the arguments
+    parser.add_argument(
+        '--repo', 
+        type=str, 
+        help='A string value for limiting the repository'
+    )
+    
+    parser.add_argument(
+        '--offline', 
+        action='store_true', 
+        help='A flag indicating whether to run in offline mode'
+    )
+    
+    # Parse the arguments
+    args = parser.parse_args()
+    
+    # Accessing the arguments
+    limit_repo = args.repo if args.repo else ""
+    offline = args.offline
     print('limit repo =', limit_repo)
+    print('offline =', offline)
 
     # 1. Get the list of Nexus proxy repositories
     proxy_repositories = get_nexus_proxy_repositories(nexus_server_url)
@@ -173,8 +158,8 @@ def main():
             print('\nzip file name:', zip_file_name)
             
             # If zip file is generated, proceed with scanning
-            if zip_file_name:
-                SCA_scan_packages(repository, zip_file_name, SCA_auth_url, SCA_api_url, proxy_servers)
+            if zip_file_name and not offline:
+                SCA_api.SCA_scan_packages(SCA_project_name + '_' + repository, zip_file_name, SCA_auth_url, SCA_api_url, proxy_servers)
  
 if __name__ == '__main__':
    main()

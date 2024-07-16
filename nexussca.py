@@ -10,7 +10,7 @@ from packaging.version import parse as version_parse
 
 # Path to the executable file
 nexus_repository_suffix = "/service/rest/v1/components?repository="
-code_folder = './manifest'
+code_folder = 'manifest'
 SCA_project_name = 'nexus_sca'
 
 def get_nexus_proxy_repositories(nexus_url):
@@ -31,8 +31,7 @@ def zip_file(source_file, zip_file_name):
 
 def treat_package_list(packages, format):
     try:
-
-        file_name = os.getcwd() +'\manifest'
+        file_name = os.path.join(os.getcwd(), code_folder)
         file_name = str(parse_json_store.create_package(packages, file_name, format))
         zip_file_name = str(file_name) + '.zip'
         zip_file(file_name, zip_file_name)
@@ -109,6 +108,43 @@ def get_packages_list(repository_name):
         print("Exception:", e)
         return None, None
 
+def upload_offline_files():
+    try:
+        # Define the directory containing the zip files
+        manifest_dir = os.path.join(os.getcwd(), code_folder)
+        
+        # Check if the directory exists
+        if not os.path.isdir(manifest_dir):
+            print(f"The directory '{manifest_dir}' does not exist.")
+            return
+
+        # Iterate through all files in the 'manifest' directory
+        for foldername, subfolders, filenames in os.walk(manifest_dir):
+            for filename in filenames:
+                # Check if the file is a zip file
+                if filename.endswith('.zip'):
+                    try:
+                        # Check if the zip file name contains 'package.json'
+                        if 'package.json' in filename:
+                            repository = 'npm'
+                        # Check if the zip file name contains 'nuget.csproj'
+                        elif 'nuget.csproj' in filename:
+                            repository = 'nuget'
+                        elif 'requirements.txt' in filename:
+                            repository = 'pypi'
+                        elif 'pom.xml' in filename:
+                            repository = 'maven'
+                        else:
+                            repository = 'repo'
+                    except Exception as e:
+                        print(f"Error processing file {filename}: {e}")
+                
+                    # If zip file is generated, proceed with scanning
+                    zip_full_path = os.path.join(foldername, filename)
+                    SCA_api.SCA_scan_packages(SCA_project_name + '_' + repository, zip_full_path, SCA_auth_url, SCA_api_url, proxy_servers)
+    except Exception as e:
+        print("Exception: upload_offline_files:", str(e))
+
 #################################################
 # main code
 #################################################
@@ -129,37 +165,48 @@ def main():
         help='A flag indicating whether to run in offline mode'
     )
     
+    parser.add_argument(
+        '--upload', 
+        action='store_true', 
+        help='upload manifest zip files from current manifest folder'
+    )
+    
     # Parse the arguments
     args = parser.parse_args()
     
     # Accessing the arguments
     limit_repo = args.repo if args.repo else ""
     offline = args.offline
+    upload = args.upload
     print('limit repo =', limit_repo)
     print('offline =', offline)
+    print('upload =', upload)
 
-    # 1. Get the list of Nexus proxy repositories
-    proxy_repositories = get_nexus_proxy_repositories(nexus_server_url)
+    if(upload):
+        upload_offline_files()
+    else:    
+        # 1. Get the list of Nexus proxy repositories
+        proxy_repositories = get_nexus_proxy_repositories(nexus_server_url)
 
-    # Print the list of proxy repositories
-    print("\nproxy repositories:")
-    for repository in proxy_repositories:
-        print(repository)
+        # Print the list of proxy repositories
+        print("\nproxy repositories:")
+        for repository in proxy_repositories:
+            print(repository)
 
-    # Iterate through each repository
-    for repository in proxy_repositories:
-        # Check if limit_packages is empty or matches the current repository
-        if not limit_repo or repository == limit_repo:
-            # Get the list of packages for the current repository
-            packages_list, format = get_packages_list(repository)
-            
-            # Treat the package list to create a zip file
-            zip_file_name = treat_package_list(packages_list, format)
-            print('\nzip file name:', zip_file_name)
-            
-            # If zip file is generated, proceed with scanning
-            if zip_file_name and not offline:
-                SCA_api.SCA_scan_packages(SCA_project_name + '_' + repository, zip_file_name, SCA_auth_url, SCA_api_url, proxy_servers)
+        # Iterate through each repository
+        for repository in proxy_repositories:
+            # Check if limit_packages is empty or matches the current repository
+            if not limit_repo or repository == limit_repo:
+                # Get the list of packages for the current repository
+                packages_list, format = get_packages_list(repository)
+                
+                # Treat the package list to create a zip file
+                zip_file_name = treat_package_list(packages_list, format)
+                print('\nzip file name:', zip_file_name)
+                
+                # If zip file is generated, proceed with scanning
+                if zip_file_name and not offline:
+                    SCA_api.SCA_scan_packages(SCA_project_name + '_' + repository, zip_file_name, SCA_auth_url, SCA_api_url, proxy_servers)
  
 if __name__ == '__main__':
    main()

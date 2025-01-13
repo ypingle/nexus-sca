@@ -1,10 +1,9 @@
 import parse_json_store
 import SCA_api
-from SCA_api import nexus_server_url, SCA_auth_url, SCA_api_url, proxy_servers 
+from SCA_api import nexus_server_url
 import requests
 import os
 import zipfile
-import sys
 import argparse
 from packaging.version import parse as version_parse
 
@@ -141,7 +140,7 @@ def upload_offline_files():
                 
                     # If zip file is generated, proceed with scanning
                     zip_full_path = os.path.join(foldername, filename)
-                    SCA_api.SCA_scan_packages(SCA_project_name + '_' + repository, zip_full_path, SCA_auth_url, SCA_api_url, proxy_servers)
+                    SCA_api.SCA_scan_packages(SCA_project_name + '_' + repository, zip_full_path)
     except Exception as e:
         print("Exception: upload_offline_files:", str(e))
 
@@ -206,7 +205,7 @@ def main():
                 
                 # If zip file is generated, proceed with scanning
                 if zip_file_name and not offline:
-                    SCA_api.SCA_scan_packages(SCA_project_name + '_' + repository, zip_file_name, SCA_auth_url, SCA_api_url, proxy_servers)
+                    SCA_api.SCA_scan_packages(SCA_project_name + '_' + repository, zip_file_name)
  
 if __name__ == '__main__':
    main()

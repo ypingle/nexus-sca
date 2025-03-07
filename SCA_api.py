@@ -4,6 +4,7 @@ import os
 import yaml
 import smtplib
 from email.mime.text import MIMEText
+import time
 
 # Open the YAML file
 with open('config_sca.yaml', 'r') as file:
@@ -17,6 +18,7 @@ SCA_url = config['SCA_url']
 SCA_api_url = config['SCA_api_url']
 SCA_auth_url = config['SCA_auth_url']
 SCA_proxy = config['SCA_proxy']
+SCA_high_threshold = config['SCA_high_threshold']
 nexus_server_url = config['nexus_server_url']
 proxy_servers = {
    'https': SCA_proxy
@@ -70,7 +72,7 @@ def get_access_token():
 
         response = requests.post(SCA_auth_url, headers=headers, data=payload, proxies=proxy_servers, verify=False)
 
-#        print('get_access_token - token = ' + response.text)
+        print('get_access_token - token = ' + response.text)
         response.raise_for_status()  # Raise an HTTPError for bad responses
         access_token = response.json()['access_token']
         return access_token
@@ -258,7 +260,7 @@ def SCA_get_scan_status(scan_id, access_token=""):
         access_token = get_access_token()
 
     url = SCA_api_url + "/api/scans/" + scan_id
-    
+
     try:
         payload = {}
         headers = {
@@ -267,13 +269,20 @@ def SCA_get_scan_status(scan_id, access_token=""):
 
         response = requests.request("GET", url, headers=headers, data=payload, proxies=proxy_servers, verify=False)
         status = response.content
+
+        # Convert binary to string and parse JSON
+        response_str = status.decode('utf-8')
+        response_json = json.loads(response_str)
+
+        # Get the status
+        current_status = response_json.get('status')
    
     except Exception as e:
         print("Exception: SCA_get_scan_status", str(e))
         return ""
     else:
         print('SCSCA_get_scan_status')
-        return status
+        return current_status
 
 def SCA_get_report(project_name, report_type, access_token=""):
     if(not access_token):
@@ -323,17 +332,38 @@ def SCA_report_get_details_from_json(file_path):
     else:
         return resultUrl, high_vulnerability_count, medium_vulnerability_count
 
-def SCA_scan_packages(project_name, zip_manifest_file, access_token=""):
-    if(not access_token):
-        access_token = get_access_token()
+def SCA_scan_packages(project_name, zip_manifest_file, access_token="", team_name=None):
+    try:
+        if(not access_token):
+            access_token = get_access_token()
 
         project_id = SCA_get_project_id(project_name, access_token)
         if (project_id == ''):
-            project_id = SCA_create_project(project_name, access_token)
-        if project_id:
-            upload_file_url = SCA_get_upload_link(project_id, access_token)
-            if upload_file_url:
-                SCA_upload_file(upload_file_url, zip_manifest_file, access_token)
-                scan_id = SCA_scan_zip(project_id, upload_file_url)
-                return scan_id
-    return None
+            project_id = SCA_create_project(project_name, access_token, team_name)
+        if (project_id == ''):
+            return None
+        upload_file_url = SCA_get_upload_link(project_id, access_token)
+        if upload_file_url:
+            SCA_upload_file(upload_file_url, zip_manifest_file, access_token)
+            scan_id = SCA_scan_zip(project_id, upload_file_url, access_token)
+
+            if SCA_high_threshold is not None and SCA_high_threshold > 0:
+                status = 'Running'
+                while(status == 'Running'):
+                    time.sleep(5)
+                    status = SCA_get_scan_status(scan_id, access_token)
+                    print('scan status:' + status)
+
+                report_path = SCA_get_report(project_name, 'json')
+                resultUrl, high_vulnerability_count, medium_vulnerability_count = SCA_report_get_details_from_json(report_path)
+                print('high = ' + str(high_vulnerability_count))
+                print('medium = ' + str(medium_vulnerability_count))
+                print('result pth = ' + resultUrl)
+
+                if(high_vulnerability_count > SCA_high_threshold):
+                    return 1
+
+            return None
+    except Exception as e:
+        print("Exception: SCA_report_get_high_vulnerabilities_count failed:", str(e))
+        return None
